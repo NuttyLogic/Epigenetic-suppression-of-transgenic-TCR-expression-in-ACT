@@ -104,3 +104,9 @@ venv.bak/
 .mypy_cache/
 
 /scratch*
+
+/VectorInsertionValidation/SimulationData/*.fa
+/VectorInsertionValidation/SimulationData/*.fa.gz
+/VectorInsertionValidation/SimulationData/IntegrationSim/*
+/VectorInsertionValidation/SimulationData/SimulationIndex/*
+

@@ -7,62 +7,78 @@ class ProcessVectorSpanningReads:
     def __init__(self, read_uniqueness_threshold: float = 1.1, read_mapping_threshold: float = 0.9,
                  multibase_threshold: float = 0.1):
         self.first_read = {'65', '67', '73', '81', '89', '97', '113', '115', '321', '323', '345', '329', '369', '371'}
-        self.proper_pair = {'67', '131', '115', '179', '323', '371', '387', '435'}
+        self.fr_reference = {'W_C2T', 'C_G2A'}
         self.read_uniqueness_threshold = read_uniqueness_threshold
         self.read_mapping_threshold = read_mapping_threshold
         self.multibase_threshold = multibase_threshold
 
     def get_integration_sites(self, read_group: list = None, vector: str = None):
         first_reads, second_reads = self.get_paired_reads(read_group)
-        group_1 = self.process_read_mapping(first_reads, vector)
-        group_2 = self.process_read_mapping(second_reads, vector)
-        read_1_pass, read1_integration_site = self.assess_alignments(group_1, vector)
-        read_2_pass, read2_integration_site = self.assess_alignments(group_2, vector)
-        print(read_1_pass, read_2_pass)
-        print(read1_integration_site, read2_integration_site)
-
-    def process_read_groups(self, group_1, group_2):
-        if group_1[6] and group_2[6]:
+        group_1 = self.process_read_mapping(first_reads)
+        group_2 = self.process_read_mapping(second_reads)
+        g1_vector, g1_genome, g1_split = self.assess_alignment_contigs(group_1, vector)
+        g2_vector, g2_genome, g2_split = self.assess_alignment_contigs(group_2, vector)
+        # discard read groups with conflicting integration site information
+        if g1_split and g2_split:
             return None
-        pass
-
-    def assess_alignments(self, group, vector):
-        total_bases, multi_bases, vector_bases, genome_bases, read_len, mapped_contigs, vector_mapping = group
-        read_uniqueness = (total_bases / read_len) < self.read_uniqueness_threshold
-        read_mapped_prop = ((total_bases - multi_bases) / read_len) > self.read_mapping_threshold
-        multi_mapping_bases = (multi_bases / read_len) < self.multibase_threshold
-        mapping_count = 0
-        for mappings in mapped_contigs.values():
-            mapping_count += len(mappings)
-        contig_mappings = mapping_count == 1
-        if vector_mapping:
-            contig_mappings = mapping_count <= 2
-        if not all((read_uniqueness, read_mapped_prop, multi_mapping_bases, contig_mappings)):
+        # discard read group with only chromosome or vector mapping information
+        if not any((g1_vector, g2_vector)) or not any((g1_genome, g2_genome)):
             return None
-        integration_site = None
-        if vector_mapping and len(mapped_contigs) > 1:
-            integration_site = self.get_split_site(mapped_contigs, vector)
-        return True, integration_site
+        # discordant reads
+        if not g1_split and not g2_split:
+            # read information -> QNAME, CHROM, mapping_ref, l_reference_pos, r_reference_pos,
+            # l_query_pos, r_query_pos, Alignment_Score, list[matched_base_position: int]
+            return self.process_discordant_int(group_1, group_2, g1_genome)
+        return self.process_split_int(group_1, group_2, g1_split, g1_genome, g2_genome, vector)
 
-    def get_split_site(self, mapped_contigs, vector):
-        chrom_site, vector_site = None, None
-        integration_contig = None
-        chrom_split, vector_split = None, None
-        for contig, sites in mapped_contigs.items():
-            if contig == vector:
-                vector_site = sites[0]
+    @staticmethod
+    def process_split_int(group_1: list, group_2: list, g1_split: bool, g1_genome: bool, g2_genome: bool, vector: str):
+        split_group = group_1 if g1_split else group_2
+        supporting_group = group_1 if not g1_split else group_2
+        supporting_genome = g1_genome if not g1_split else g2_genome
+        genome_split, vector_split = None, None
+        for read in split_group:
+            if read[1] == vector:
+                vector_split = read
             else:
-                integration_contig = contig
-                chrom_site = sites[0]
-        if not chrom_site:
-            return None
-        if chrom_site[2] < vector_site[2]:
-            chrom_split = chrom_site[1]
-            vector_split = vector_site[0]
+                genome_split = read
+        ref_pos = genome_split[3] if genome_split[5] > vector_split[5] else genome_split[4]
+        if not supporting_group:
+            return 'split_single', genome_split[0], genome_split[1], ref_pos, genome_split[7], vector_split[7]
         else:
-            chrom_split = chrom_site[0]
-            vector_split = vector_site[1]
-        return integration_contig, chrom_split, vector_split
+            if supporting_genome:
+                if supporting_group[0][1] != genome_split[0][1]:
+                    return None
+                return 'split_paired', genome_split[0], genome_split[1], ref_pos, \
+                       genome_split[7] + supporting_group[0][7], vector_split[7]
+            else:
+                return 'split_paired', genome_split[0], genome_split[1], ref_pos, \
+                       genome_split[7], vector_split[7] + supporting_group[0][7]
+
+    def process_discordant_int(self, group_1, group_2, g1_genome):
+        read_1 = group_1[0]
+        read_2 = group_2[0]
+        if g1_genome:
+            ref_pos = read_1[4] if read_1[2] in self.fr_reference else read_1[3]
+            return 'discord_1', read_1[0], read_1[1], ref_pos, read_1[7], read_2[7]
+        else:
+            ref_pos = read_2[3] if read_2[2] in self.fr_reference else read_2[4]
+            return 'discord_2', read_2[0], read_2[1], ref_pos, read_2[7], read_1[7]
+
+    @staticmethod
+    def assess_alignment_contigs(read_group: list, vector: str) -> (bool, bool):
+        vector_mapping, genome_mapping = False, False
+        genome_contigs = []
+        for read in read_group:
+            if read[1] == vector:
+                vector_mapping = True
+            else:
+                genome_contigs.append(read[1])
+                genome_mapping = True
+        if len(genome_contigs) > 1:
+            genome_mapping = False
+            vector_mapping = False
+        return vector_mapping, genome_mapping, all((vector_mapping, genome_mapping))
 
     def get_paired_reads(self, read_group):
         first_reads, second_reads = [], []
@@ -73,31 +89,43 @@ class ProcessVectorSpanningReads:
                 second_reads.append(read)
         return first_reads, second_reads
 
-    def process_read_mapping(self, read_paired, vector):
-        observed_bases = []
-        mapped_contigs = {}
-        vector_bases, genome_bases = 0, 0
-        read_len = None
-        vector_mapping = False
+    def process_read_mapping(self, read_paired):
+        processed_reads = []
         for read in read_paired:
             cigar_tuple = convert_alpha_numeric_cigar(read[4])
             left_most_pos = int(read[3])
-            read_bases, read_len, right_most_pos, l_pos, r_pos = self.get_mapped_bases(cigar_tuple, left_most_pos)
-            if read[2] not in mapped_contigs:
-                mapped_contigs[read[2]] = [(left_most_pos, right_most_pos, l_pos, r_pos)]
-            else:
-                mapped_contigs[read[2]].append((left_most_pos, right_most_pos, l_pos, r_pos))
-            observed_bases.extend(read_bases)
-            if read[2] == vector:
-                vector_bases += len(read_bases)
-                vector_mapping = True
-            else:
-                genome_bases += len(read_bases)
-        total_bases = len(observed_bases)
-        multi_bases = total_bases - len(set(observed_bases))
-        return total_bases, multi_bases, vector_bases, genome_bases, read_len, mapped_contigs, vector_mapping
+            # read information -> l_query_pos, r_query_pos, l_reference_pos,
+            # r_reference_pos, list[matched_base_position: int]
+            l_pos, r_pos, reference_pos, matched_base_pos = self.get_mapped_bases(cigar_tuple, left_most_pos)
+            # read information -> QNAME, CHROM, mapping_ref, l_ref_pos, r_ref_pos, l_query_pos,
+            # r_query_pos, Alignment_Score, list[matched_base_position: int]
+            processed_reads.append(
+                (read[0], read[2], read[8], left_most_pos, reference_pos, l_pos, r_pos, read[7], matched_base_pos))
+        processed_reads.sort(key=lambda x: x[7], reverse=True)
+        if not processed_reads:
+            return processed_reads
+        if len(processed_reads) < 2:
+            return [read[0:8] for read in processed_reads]
+        else:
+            primary_reads = [processed_reads[0]]
+            duplicate_read = False
+            for read in processed_reads[1:]:
+                for p_read in primary_reads:
+                    if self.get_duplication_proportion(read[8], p_read[8]) > self.multibase_threshold:
+                        if read[7] == p_read[7]:
+                            return []
+                        duplicate_read = True
+                        break
+                if not duplicate_read:
+                    primary_reads.append(read)
+        return [read[0:8] for read in primary_reads]
 
-    def get_mapped_bases(self, cigar_tuple, reference_position):
+    @staticmethod
+    def get_duplication_proportion(read_bases, comparison_bases):
+        return len([base for base in read_bases if base in comparison_bases]) / len(read_bases)
+
+    @staticmethod
+    def get_mapped_bases(cigar_tuple: tuple, reference_position: int) -> (int, int, list):
         matched_base_positions = []
         reference_consumers = {0, 2, 3, 7, 8}
         query_consumers = {0, 1, 4, 7, 8}
@@ -115,6 +143,6 @@ class ProcessVectorSpanningReads:
                     reference_position += 1
             elif cigar_type in query_consumers and cigar_type not in reference_consumers:
                 query_position += cigar_count
-            elif not cigar_type in query_consumers and cigar_type in reference_consumers:
+            elif cigar_type not in query_consumers and cigar_type in reference_consumers:
                 reference_position += 1
-        return matched_base_positions, query_position, reference_position, left_mapped_pos, right_mapped_pos
+        return left_mapped_pos, right_mapped_pos, reference_position, matched_base_positions
