@@ -1,15 +1,17 @@
+from collections import namedtuple
 from BSBolt.Align.AlignmentHelpers import convert_alpha_numeric_cigar
 
 
 class ProcessVectorSpanningReads:
     """Indentify high quality reads or read pairs that span a vector of interest and the genome."""
 
-    def __init__(self, read_uniqueness_threshold: float = 1.1, read_mapping_threshold: float = 0.9,
-                 multibase_threshold: float = 0.1):
+    def __init__(self, multibase_threshold: float = 0.1):
         self.first_read = {'65', '67', '73', '81', '89', '97', '113', '115', '321', '323', '345', '329', '369', '371'}
         self.fr_reference = {'W_C2T', 'C_G2A'}
-        self.read_uniqueness_threshold = read_uniqueness_threshold
-        self.read_mapping_threshold = read_mapping_threshold
+        self.proper_pair = {'131', '435', '371', '179', '67', '115', '323', '387'}
+        self.formatted_read = namedtuple('f_read',
+                                         ['qname', 'flag', 'rname', 'rnext', 'mapping_ref', 'left_ref', 'right_ref',
+                                          'left_query', 'right_query', 'alignment_score', 'matched_base_pos'])
         self.multibase_threshold = multibase_threshold
 
     def get_integration_sites(self, read_group: list = None, vector: str = None):
@@ -26,8 +28,6 @@ class ProcessVectorSpanningReads:
             return None
         # discordant reads
         if not g1_split and not g2_split:
-            # read information -> QNAME, CHROM, mapping_ref, l_reference_pos, r_reference_pos,
-            # l_query_pos, r_query_pos, Alignment_Score, list[matched_base_position: int]
             return self.process_discordant_int(group_1, group_2, g1_genome)
         return self.process_split_int(group_1, group_2, g1_split, g1_genome, g2_genome, vector)
 
@@ -38,42 +38,51 @@ class ProcessVectorSpanningReads:
         supporting_genome = g1_genome if not g1_split else g2_genome
         genome_split, vector_split = None, None
         for read in split_group:
-            if read[1] == vector:
+            if read.rname == vector:
                 vector_split = read
             else:
                 genome_split = read
-        ref_pos = genome_split[3] if genome_split[5] > vector_split[5] else genome_split[4]
+        ref_pos = genome_split.left_ref if genome_split.left_query > vector_split.left_query else genome_split.right_ref
         if not supporting_group:
-            return 'split_single', genome_split[0], genome_split[1], ref_pos, genome_split[7], vector_split[7]
+            return 'split_single', genome_split.qname, genome_split.rname, ref_pos, \
+                   genome_split.alignmet_score, vector_split.alignment_score
         else:
             if supporting_genome:
                 if supporting_group[0][1] != genome_split[0][1]:
                     return None
-                return 'split_paired', genome_split[0], genome_split[1], ref_pos, \
-                       genome_split[7] + supporting_group[0][7], vector_split[7]
+                return 'split_paired', genome_split.qname, genome_split.rname, ref_pos, \
+                       genome_split.alignmet_score + supporting_group[0].alignment_score, vector_split.alignment_score
             else:
-                return 'split_paired', genome_split[0], genome_split[1], ref_pos, \
-                       genome_split[7], vector_split[7] + supporting_group[0][7]
+                return 'split_paired', genome_split.qname, genome_split.rname, ref_pos, \
+                       genome_split.alignmet_score, vector_split.alignment_score + supporting_group[0].alignment_score
 
     def process_discordant_int(self, group_1, group_2, g1_genome):
         read_1 = group_1[0]
         read_2 = group_2[0]
+        if read_1.flag in self.proper_pair:
+            return None
         if g1_genome:
-            ref_pos = read_1[4] if read_1[2] in self.fr_reference else read_1[3]
-            return 'discord_1', read_1[0], read_1[1], ref_pos, read_1[7], read_2[7]
+            ref_pos = read_1.right_ref if read_1.flag in self.fr_reference else read_1.left_ref
+            return 'discord_1', read_1.qname, read_1.rname, ref_pos, read_1.alignment_score, read_2.alignment_score
         else:
-            ref_pos = read_2[3] if read_2[2] in self.fr_reference else read_2[4]
-            return 'discord_2', read_2[0], read_2[1], ref_pos, read_2[7], read_1[7]
+            ref_pos = read_2.left_ref if read_2.flag in self.fr_reference else read_2.right_ref
+            return 'discord_2', read_2.qname, read_2.rname, ref_pos, read_2.alignment_score, read_1.alignment_score
+
+    @staticmethod
+    def process_read_groups(group_1, group_2):
+        if group_1[6] and group_2[6]:
+            return None
+        pass
 
     @staticmethod
     def assess_alignment_contigs(read_group: list, vector: str) -> (bool, bool):
         vector_mapping, genome_mapping = False, False
         genome_contigs = []
         for read in read_group:
-            if read[1] == vector:
+            if read.rname == vector:
                 vector_mapping = True
             else:
-                genome_contigs.append(read[1])
+                genome_contigs.append(read.rname)
                 genome_mapping = True
         if len(genome_contigs) > 1:
             genome_mapping = False
@@ -92,33 +101,29 @@ class ProcessVectorSpanningReads:
     def process_read_mapping(self, read_paired):
         processed_reads = []
         for read in read_paired:
-            cigar_tuple = convert_alpha_numeric_cigar(read[4])
-            left_most_pos = int(read[3])
-            # read information -> l_query_pos, r_query_pos, l_reference_pos,
-            # r_reference_pos, list[matched_base_position: int]
-            l_pos, r_pos, reference_pos, matched_base_pos = self.get_mapped_bases(cigar_tuple, left_most_pos)
-            # read information -> QNAME, CHROM, mapping_ref, l_ref_pos, r_ref_pos, l_query_pos,
-            # r_query_pos, Alignment_Score, list[matched_base_position: int]
-            processed_reads.append(
-                (read[0], read[2], read[8], left_most_pos, reference_pos, l_pos, r_pos, read[7], matched_base_pos))
-        processed_reads.sort(key=lambda x: x[7], reverse=True)
+            qname, flag, rname, rnext, pos, cigar, alignment_score, mapping_ref = read
+            cigar_tuple = convert_alpha_numeric_cigar(cigar)
+            l_pos, r_pos, reference_pos, matched_base_pos = self.get_mapped_bases(cigar_tuple, pos)
+            formatted_read = self.formatted_read(qname, flag, rname, rnext, mapping_ref, pos, reference_pos, l_pos,
+                                                 r_pos, alignment_score, matched_base_pos)
+            processed_reads.append(formatted_read)
+        processed_reads.sort(key=lambda x: x.alignment_score, reverse=True)
         if not processed_reads:
             return processed_reads
         if len(processed_reads) < 2:
-            return [read[0:8] for read in processed_reads]
+            return processed_reads
         else:
             primary_reads = [processed_reads[0]]
             duplicate_read = False
             for read in processed_reads[1:]:
                 for p_read in primary_reads:
-                    if self.get_duplication_proportion(read[8], p_read[8]) > self.multibase_threshold:
-                        if read[7] == p_read[7]:
-                            return []
+                    if self.get_duplication_proportion(read.matched_base_pos,
+                                                       p_read.matched_base_pos) > self.multibase_threshold:
                         duplicate_read = True
                         break
                 if not duplicate_read:
                     primary_reads.append(read)
-        return [read[0:8] for read in primary_reads]
+        return primary_reads
 
     @staticmethod
     def get_duplication_proportion(read_bases, comparison_bases):
