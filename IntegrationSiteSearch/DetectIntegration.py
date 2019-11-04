@@ -3,16 +3,17 @@ from BSBolt.Align.AlignmentHelpers import convert_alpha_numeric_cigar
 
 
 class ProcessVectorSpanningReads:
-    """Indentify high quality reads or read pairs that span a vector of interest and the genome."""
+    """Identify high quality reads or read pairs that span a vector of interest and the genome."""
 
-    def __init__(self, multibase_threshold: float = 0.1):
+    def __init__(self, multibase_threshold: float = 0.1, multiread_threshold: int = 250):
         self.first_read = {'65', '67', '73', '81', '89', '97', '113', '115', '321', '323', '345', '329', '369', '371'}
-        self.fr_reference = {'W_C2T', 'C_G2A'}
+        self.fr_reference = {'W_C2T'}
         self.proper_pair = {'131', '435', '371', '179', '67', '115', '323', '387'}
         self.formatted_read = namedtuple('f_read',
                                          ['qname', 'flag', 'rname', 'rnext', 'mapping_ref', 'left_ref', 'right_ref',
                                           'left_query', 'right_query', 'alignment_score', 'matched_base_pos'])
         self.multibase_threshold = multibase_threshold
+        self.multiread_threshold = multiread_threshold
 
     def get_integration_sites(self, read_group: list = None, vector: str = None):
         first_reads, second_reads = self.get_paired_reads(read_group)
@@ -44,17 +45,19 @@ class ProcessVectorSpanningReads:
                 genome_split = read
         ref_pos = genome_split.left_ref if genome_split.left_query > vector_split.left_query else genome_split.right_ref
         if not supporting_group:
-            return 'split_single', genome_split.qname, genome_split.rname, ref_pos, \
-                   genome_split.alignmet_score, vector_split.alignment_score
+            return 'split_single', genome_split.qname, genome_split.rname, ref_pos, genome_split.left_ref, \
+                   genome_split.right_ref, genome_split.alignment_score, vector_split.alignment_score
         else:
             if supporting_genome:
                 if supporting_group[0][1] != genome_split[0][1]:
                     return None
                 return 'split_paired', genome_split.qname, genome_split.rname, ref_pos, \
-                       genome_split.alignmet_score + supporting_group[0].alignment_score, vector_split.alignment_score
+                       genome_split.left_ref, genome_split.right_ref,\
+                       genome_split.alignment_score + supporting_group[0].alignment_score, vector_split.alignment_score
             else:
-                return 'split_paired', genome_split.qname, genome_split.rname, ref_pos, \
-                       genome_split.alignmet_score, vector_split.alignment_score + supporting_group[0].alignment_score
+                return 'split_paired', genome_split.qname, genome_split.rname, ref_pos, genome_split.left_ref, \
+                       genome_split.right_ref, genome_split.alignment_score, \
+                       vector_split.alignment_score + supporting_group[0].alignment_score
 
     def process_discordant_int(self, group_1, group_2, g1_genome):
         read_1 = group_1[0]
@@ -62,11 +65,13 @@ class ProcessVectorSpanningReads:
         if read_1.flag in self.proper_pair:
             return None
         if g1_genome:
-            ref_pos = read_1.right_ref if read_1.flag in self.fr_reference else read_1.left_ref
-            return 'discord_1', read_1.qname, read_1.rname, ref_pos, read_1.alignment_score, read_2.alignment_score
+            ref_pos = read_1.right_ref if read_1.mapping_ref in self.fr_reference else read_1.left_ref
+            return 'discord_1', read_1.qname, read_1.rname, ref_pos, read_1.left_ref, read_1.right_ref, \
+                   read_1.alignment_score, read_2.alignment_score
         else:
-            ref_pos = read_2.left_ref if read_2.flag in self.fr_reference else read_2.right_ref
-            return 'discord_2', read_2.qname, read_2.rname, ref_pos, read_2.alignment_score, read_1.alignment_score
+            ref_pos = read_2.left_ref if read_2.mapping_ref in self.fr_reference else read_2.right_ref
+            return 'discord_2', read_2.qname, read_2.rname, ref_pos, read_2.left_ref, read_2.right_ref, \
+                   read_2.alignment_score, read_1.alignment_score
 
     @staticmethod
     def process_read_groups(group_1, group_2):
@@ -108,6 +113,9 @@ class ProcessVectorSpanningReads:
                                                  r_pos, alignment_score, matched_base_pos)
             processed_reads.append(formatted_read)
         processed_reads.sort(key=lambda x: x.alignment_score, reverse=True)
+        matched_base_total = sum([len(read.matched_base_pos) for read in processed_reads])
+        if matched_base_total > self.multiread_threshold:
+            return []
         if not processed_reads:
             return processed_reads
         if len(processed_reads) < 2:

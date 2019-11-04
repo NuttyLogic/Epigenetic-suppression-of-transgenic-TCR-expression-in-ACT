@@ -44,3 +44,12 @@ def get_spanning_reads(file_path: str = None, plasmid_names: set = None) -> dict
                     plasmid_reads[qname] = read_group[0]
                     break
     return plasmid_reads
+
+
+def call_read_integrations(integration_processor, vector_mapped_reads, vector):
+    integration_calls = []
+    for read_label, read_group in vector_mapped_reads.items():
+        called_integration = integration_processor.get_integration_sites(read_group, vector=vector)
+        if called_integration:
+            integration_calls.append(called_integration)
+    return integration_calls

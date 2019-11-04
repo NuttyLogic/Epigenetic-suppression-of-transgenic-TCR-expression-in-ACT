@@ -1,6 +1,5 @@
 from setuptools import setup
 
-
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
@@ -15,8 +14,9 @@ setup(name='BSIntegration',
       author_email='colinpfarrell@gmail.com',
       license='MIT',
       packages=['IntegrationSiteSearch'],
-      entry_points={'console_scripts': ['BSBolt = BSBolt.__main__:launch_bsb']},
       python_requires='>=3.6',
+      requires=['numpy', 'BSBolt'],
+      install_requires=['numpy>=1.16.3', 'BSBolt>=0.0.1'],
       test_suite='tests',
       include_package_data=True,
       )
