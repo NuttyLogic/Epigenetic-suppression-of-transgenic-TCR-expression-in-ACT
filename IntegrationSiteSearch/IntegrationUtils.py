@@ -40,7 +40,7 @@ def get_spanning_reads(file_path: str = None, plasmid_names: set = None) -> dict
     for qname, read_group in mapped_reads.items():
         if read_group[1]:
             for read in read_group[0]:
-                if read[0][0:3] == 'chr':
+                if read[2][0:3] == 'chr':
                     plasmid_reads[qname] = read_group[0]
                     break
     return plasmid_reads
