@@ -44,20 +44,25 @@ class ProcessVectorSpanningReads:
             else:
                 genome_split = read
         ref_pos = genome_split.left_ref if genome_split.left_query > vector_split.left_query else genome_split.right_ref
+        vector_pos = vector_split.right_ref if genome_split.left_query > vector_split.left_query else \
+            vector_split.left_ref
         if not supporting_group:
             return 'split_single', genome_split.qname, genome_split.rname, ref_pos, genome_split.left_ref, \
-                   genome_split.right_ref, genome_split.alignment_score, vector_split.alignment_score
+                   genome_split.right_ref, genome_split.alignment_score, vector_split.alignment_score,\
+                   vector_pos
         else:
             if supporting_genome:
                 if supporting_group[0][1] != genome_split[0][1]:
                     return None
                 return 'split_paired', genome_split.qname, genome_split.rname, ref_pos, \
                        genome_split.left_ref, genome_split.right_ref,\
-                       genome_split.alignment_score + supporting_group[0].alignment_score, vector_split.alignment_score
+                       genome_split.alignment_score + supporting_group[0].alignment_score, \
+                       vector_split.alignment_score, vector_pos
             else:
                 return 'split_paired', genome_split.qname, genome_split.rname, ref_pos, genome_split.left_ref, \
                        genome_split.right_ref, genome_split.alignment_score, \
-                       vector_split.alignment_score + supporting_group[0].alignment_score
+                       vector_split.alignment_score + supporting_group[0].alignment_score, \
+                       vector_pos
 
     def process_discordant_int(self, group_1, group_2, g1_genome):
         read_1 = group_1[0]
@@ -66,12 +71,14 @@ class ProcessVectorSpanningReads:
             return None
         if g1_genome:
             ref_pos = read_1.right_ref if read_1.mapping_ref in self.fr_reference else read_1.left_ref
+            vector_pos = read_2.left_ref if read_1.mapping_ref in self.fr_reference else read_2.right_ref
             return 'discord_1', read_1.qname, read_1.rname, ref_pos, read_1.left_ref, read_1.right_ref, \
-                   read_1.alignment_score, read_2.alignment_score
+                   read_1.alignment_score, read_2.alignment_score, vector_pos
         else:
             ref_pos = read_2.left_ref if read_2.mapping_ref in self.fr_reference else read_2.right_ref
+            vector_pos = read_1.right_ref if read_2.mapping_ref in self.fr_reference else read_1.left_ref
             return 'discord_2', read_2.qname, read_2.rname, ref_pos, read_2.left_ref, read_2.right_ref, \
-                   read_2.alignment_score, read_1.alignment_score
+                   read_2.alignment_score, read_1.alignment_score, vector_pos
 
     @staticmethod
     def process_read_groups(group_1, group_2):
