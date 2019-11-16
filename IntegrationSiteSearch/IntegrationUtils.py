@@ -25,7 +25,7 @@ def stream_mapped_reads(file_path, included_flag=None, excluded_flag=None):
 
 def get_spanning_reads(file_path: str = None, plasmid_names: set = None) -> dict:
     mapped_reads = {}
-    for sam_read in stream_mapped_reads(file_path, included_flag=4, excluded_flag=1540):
+    for sam_read in stream_mapped_reads(file_path, included_flag=0, excluded_flag=1540):
         QNAME, FLAG, RNAME, RNEXT, POS, CIGAR, alignment_score, mapping_reference = sam_read
         plasmid_read = RNAME in plasmid_names
         if QNAME not in mapped_reads:
