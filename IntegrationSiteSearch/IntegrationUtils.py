@@ -1,14 +1,19 @@
 import subprocess
+from typing import Dict, Iterator, List, Tuple, Union
 
 
-def stream_mapped_reads(file_path, included_flag=None, excluded_flag=None):
+def stream_mapped_reads(file_path: str = None,
+                        included_flags: list = None,
+                        excluded_flags: list = None) -> Iterator[Tuple[str, str, str, str, int, str, int, str]]:
     """ process reads streamed using samtools view, samtools must be on
         path for this to work """
     stream_command = ['samtools', 'view']
-    if included_flag:
-        stream_command.extend(['-F', str(included_flag)])
-    if excluded_flag:
-        stream_command.extend(['-f', str(excluded_flag)])
+    if included_flags:
+        for flag in included_flags:
+            stream_command.extend(['-f', str(flag)])
+    if excluded_flags:
+        for flag in excluded_flags:
+            stream_command.extend(['-F', str(flag)])
     stream_command.append(file_path)
     read_stream = subprocess.Popen(stream_command, stdout=subprocess.PIPE, universal_newlines=True)
     for line in iter(read_stream.stdout.readline, ''):
@@ -23,9 +28,9 @@ def stream_mapped_reads(file_path, included_flag=None, excluded_flag=None):
         yield QNAME, FLAG, RNAME, RNEXT, int(POS), CIGAR, int(alignment_score), mapping_reference
 
 
-def get_spanning_reads(file_path: str = None, plasmid_names: set = None) -> dict:
+def get_spanning_reads(file_path: str = None, plasmid_names: set = None) -> Dict[str, Union[List[Tuple[str]], bool]]:
     mapped_reads = {}
-    for sam_read in stream_mapped_reads(file_path, included_flag=0, excluded_flag=1024):
+    for sam_read in stream_mapped_reads(file_path, excluded_flags=[4, 1024]):
         QNAME, FLAG, RNAME, RNEXT, POS, CIGAR, alignment_score, mapping_reference = sam_read
         plasmid_read = RNAME in plasmid_names
         if QNAME not in mapped_reads:
