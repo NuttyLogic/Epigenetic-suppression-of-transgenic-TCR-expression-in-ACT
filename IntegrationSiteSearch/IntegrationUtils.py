@@ -25,6 +25,8 @@ def stream_mapped_reads(file_path: str = None,
                 alignment_score = tag.split(':')[-1]
             elif tag[0:4] == 'XO:Z':
                 mapping_reference = tag.split(':')[-1]
+        if not alignment_score or not mapping_reference:
+            continue
         yield QNAME, FLAG, RNAME, RNEXT, int(POS), CIGAR, int(alignment_score), mapping_reference
 
 
