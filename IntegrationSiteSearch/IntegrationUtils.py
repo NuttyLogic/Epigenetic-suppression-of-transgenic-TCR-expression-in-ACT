@@ -32,7 +32,7 @@ def stream_mapped_reads(file_path: str = None,
 
 def get_spanning_reads(file_path: str = None, plasmid_names: set = None) -> Dict[str, Union[List[Tuple[str]], bool]]:
     mapped_reads = {}
-    for sam_read in stream_mapped_reads(file_path, excluded_flags=[4, 1024]):
+    for sam_read in stream_mapped_reads(file_path, excluded_flags=[2, 4, 10, 1024]):
         QNAME, FLAG, RNAME, RNEXT, POS, CIGAR, alignment_score, mapping_reference = sam_read
         plasmid_read = RNAME in plasmid_names
         if QNAME not in mapped_reads:
