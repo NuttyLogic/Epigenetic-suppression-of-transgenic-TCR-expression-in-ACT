@@ -2,7 +2,7 @@
 
 ### Repository Components 
 1. Analysis Notebooks
-    - Analysis of processing data complete tools
+    - Analysis of processed sequencing data
 2. Data processing pipeline
     - Shell scripts for processing of paired-end bisulfite sequencing data
 3. Integration site search tool
